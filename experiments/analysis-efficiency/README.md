@@ -137,8 +137,11 @@ inventory. It must be supported by the selected server's advertised schema.
 The default `complete` runs the existing calls unchanged. Compare the same
 analyst facts and complete source Evidence before crediting a smaller response.
 Projection can reduce delivery bytes without reducing upstream analysis time.
-For SQLite WASM, summary delivery reads the completed retained result through
-the summary and exports views after preserving the original transport error.
+For WASM, the runner validates a summary request against the actual advertised
+2020-12 input schema, including SDK-generated references. Supporting servers
+return the first-call summary; older servers retain their complete path and use
+summary/export views after an observed transport constraint. Original errors
+remain in the receipts, and the complete source Evidence ID is a compared fact.
 `--javascript-question selected` analyzes only the exact Obsidian sources
 `package.json` and `main.js`, keeps inventory identity, and reads each observed
 `main.js` module by its exact node ID. Package metadata is not a module selector.
@@ -522,3 +525,5 @@ inherited search paths preserve selected facts and source identities, but the
 comparator rejects matching settings with only `provider_search_path_sha256`
 different. The original records and failed/accepted replies stay in private lab
 receipts; no environment value is copied into them.
+
+The next bounded WASM delivery cohort is documented in [first-call summary measurements](wasm-first-call.md).
