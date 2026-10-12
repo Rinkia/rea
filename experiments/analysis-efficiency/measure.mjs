@@ -243,6 +243,99 @@ const inspectManagedTarget = async () => {
   };
 };
 
+/** The same counts/export question for each pinned shipped WASM module. */
+const inspectWasmTarget = async () => {
+  let info;
+  let recovery = null;
+  const supportsSummary = catalogDefinitions
+    .get("inspect_wasm_artifact")
+    ?.inputSchema.properties?.detail?.enum?.includes("summary");
+  try {
+    info = await call("inspect_wasm_artifact", {
+      path: values.path,
+      glue_paths: [],
+      candidate_paths: [],
+      ...(values.delivery === "summary" && supportsSummary
+        ? { detail: "summary" }
+        : {}),
+    });
+  } catch (error) {
+    const reference =
+      error instanceof ToolFailure &&
+      error.value?.error?.code === "resource_constraint"
+        ? error.value.error.details?.reported_limits?.evidence_reference
+        : undefined;
+    if (reference?.kind !== "retained-evidence") throw error;
+    if (values.delivery === "summary") {
+      info = await call("inspect_analysis_view", {
+        source: reference,
+        view: { kind: "summary" },
+      });
+      recovery =
+        "existing completed producer reference read through typed WASM views";
+    } else {
+      const path = resolve(values.output, "retained-evidence.json");
+      await call("export_evidence_bundle", { path });
+      const bundle = JSON.parse(await readFile(path, "utf8"));
+      const record = bundle.records.find(
+        (row) => row.evidence_id === reference.evidence_id,
+      );
+      const { parseEvidence } = await import(
+        pathToFileURL(
+          resolve(values["runtime-root"], "dist/domain/evidence.js"),
+        ).href
+      );
+      info = parseEvidence(record);
+      recovery =
+        "complete producer Evidence exported after an observed transport constraint";
+    }
+  }
+  const n = normalized(info);
+  if (n.kind === "summary") {
+    const summary = n.summary;
+    const exportsEvidence = await call("inspect_analysis_view", {
+      source: { kind: "retained-evidence", evidence_id: n.parent_evidence_id },
+      view: { kind: "wasm", facet: "exports", offset: 0, limit: 4 },
+    });
+    return {
+      artifact_sha256: targetSha(info),
+      validation: summary.validation,
+      section_count: summary.available_counts.sections,
+      import_count: summary.available_counts.imports,
+      export_count: summary.available_counts.exports,
+      exports_first4: normalized(exportsEvidence).item,
+      wat_sha256: summary.wat.sha256,
+      wat_code_units: summary.wat.code_units,
+      tool_profile: summary.tool_profile,
+      runtime_execution: summary.runtime_execution,
+      network_fetch: summary.network_fetch,
+      evidence_ids: [
+        n.parent_evidence_id,
+        info.evidence_id,
+        exportsEvidence.evidence_id,
+      ],
+      source_evidence_id: n.parent_evidence_id,
+      recovery,
+    };
+  }
+  return {
+    artifact_sha256: targetSha(info),
+    validation: n.validation,
+    section_count: n.sections.length,
+    import_count: n.imports.length,
+    export_count: n.exports.length,
+    exports_first4: n.exports.slice(0, 4),
+    wat_sha256: n.wat.sha256,
+    wat_code_units: n.wat.text.length,
+    tool_profile: n.tool_profile,
+    runtime_execution: n.runtime_execution,
+    network_fetch: n.network_fetch,
+    evidence_ids: [info.evidence_id],
+    source_evidence_id: info.evidence_id,
+    recovery,
+  };
+};
+
 const workflows = {
   "obsidian.asar": async () => {
     if (values["javascript-question"] === "selected") {
@@ -424,85 +517,9 @@ const workflows = {
       evidence_ids: [info.evidence_id],
     };
   },
-  "sqlite.wasm": async () => {
-    let info;
-    let recovery = null;
-    try {
-      info = await call("inspect_wasm_artifact", {
-        path: values.path,
-        glue_paths: [],
-        candidate_paths: [],
-      });
-    } catch (error) {
-      const reference =
-        error instanceof ToolFailure &&
-        error.value?.error?.code === "resource_constraint"
-          ? error.value.error.details?.reported_limits?.evidence_reference
-          : undefined;
-      if (reference?.kind !== "retained-evidence") throw error;
-      if (values.delivery === "summary") {
-        const summaryEvidence = await call("inspect_analysis_view", {
-          source: reference,
-          view: { kind: "summary" },
-        });
-        const summary = normalized(summaryEvidence).summary;
-        const exportsEvidence = await call("inspect_analysis_view", {
-          source: reference,
-          view: { kind: "wasm", facet: "exports", offset: 0, limit: 4 },
-        });
-        return {
-          artifact_sha256: targetSha(summaryEvidence),
-          validation: summary.validation,
-          section_count: summary.available_counts.sections,
-          import_count: summary.available_counts.imports,
-          export_count: summary.available_counts.exports,
-          exports_first4: normalized(exportsEvidence).item,
-          wat_sha256: summary.wat.sha256,
-          wat_code_units: summary.wat.code_units,
-          tool_profile: summary.tool_profile,
-          runtime_execution: summary.runtime_execution,
-          network_fetch: summary.network_fetch,
-          evidence_ids: [
-            reference.evidence_id,
-            summaryEvidence.evidence_id,
-            exportsEvidence.evidence_id,
-          ],
-          recovery:
-            "existing completed producer reference read through typed WASM views",
-        };
-      }
-      const path = resolve(values.output, "retained-evidence.json");
-      await call("export_evidence_bundle", { path });
-      const bundle = JSON.parse(await readFile(path, "utf8"));
-      const record = bundle.records.find(
-        (row) => row.evidence_id === reference.evidence_id,
-      );
-      const { parseEvidence } = await import(
-        pathToFileURL(
-          resolve(values["runtime-root"], "dist/domain/evidence.js"),
-        ).href
-      );
-      info = parseEvidence(record);
-      recovery =
-        "complete producer Evidence exported after an observed transport constraint";
-    }
-    const n = normalized(info);
-    return {
-      artifact_sha256: targetSha(info),
-      validation: n.validation,
-      section_count: n.sections.length,
-      import_count: n.imports.length,
-      export_count: n.exports.length,
-      exports_first4: n.exports.slice(0, 4),
-      wat_sha256: n.wat.sha256,
-      wat_code_units: n.wat.text.length,
-      tool_profile: n.tool_profile,
-      runtime_execution: n.runtime_execution,
-      network_fetch: n.network_fetch,
-      evidence_ids: [info.evidence_id],
-      recovery,
-    };
-  },
+  "sqlite.wasm": inspectWasmTarget,
+  "vscode.tree-sitter.wasm": inspectWasmTarget,
+  "vscode.tree-sitter-css.wasm": inspectWasmTarget,
   "weth.hex": async () => {
     const info = await call("inspect_evm_interface", {
       path: values.path,
