@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { Ajv2020 } from "ajv/dist/2020.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const { values } = parseArgs({
@@ -247,14 +248,21 @@ const inspectManagedTarget = async () => {
 const inspectWasmTarget = async () => {
   let info;
   let recovery = null;
-  const supportsSummary = catalogDefinitions
-    .get("inspect_wasm_artifact")
-    ?.inputSchema.properties?.detail?.enum?.includes("summary");
+  const arguments_ = {
+    path: values.path,
+    glue_paths: [],
+    candidate_paths: [],
+  };
+  const definition = catalogDefinitions.get("inspect_wasm_artifact");
+  if (!definition) throw new Error("Missing advertised WASM definition");
+  // Validate the real advertised dialect, including SDK-generated local refs.
+  const supportsSummary = new Ajv2020({
+    strict: false,
+    validateFormats: false,
+  }).compile(definition.inputSchema)({ ...arguments_, detail: "summary" });
   try {
     info = await call("inspect_wasm_artifact", {
-      path: values.path,
-      glue_paths: [],
-      candidate_paths: [],
+      ...arguments_,
       ...(values.delivery === "summary" && supportsSummary
         ? { detail: "summary" }
         : {}),
